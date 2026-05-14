@@ -1,2 +1,5 @@
 streamlit
 supabase
+geopy
+pandas
+streamlit-drawable-canvas
