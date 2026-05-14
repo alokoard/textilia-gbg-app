@@ -16,13 +16,13 @@ if 'chaufforer' not in st.session_state:
 # Funktion för att hämta GPS-koordinater i Göteborg
 def hämta_gps(adress):
     try:
-        geolocator = Nominatim(user_agent="textilia_gbg_final")
+        geolocator = Nominatim(user_agent="textilia_gbg_final_v8")
         loc = geolocator.geocode(adress + ", Göteborg, Sweden")
         return (loc.latitude, loc.longitude) if loc else (None, None)
     except:
         return None, None
 
-st.title("🚛 Textilia Gbg Logistik - Pro v8.0")
+st.title("🚚 Textilia Gbg Logistik - Pro v8.1")
 
 tab1, tab2, tab3 = st.tabs(["👑 Chef: Planering", "📍 Chaufför: Leverans", "📊 Statistik & Analys"])
 
@@ -50,11 +50,14 @@ with tab1:
             val_c = st.selectbox("Välj chaufför för rutt:", st.session_state.chaufforer)
             adresser = st.text_area("Klistra in adresser (en per rad):")
             
-            if st.button("Skicka & Beräkna Rutt"):
+            if st.button("🚀 Skicka & Beräkna Rutt"):
                 for rad in adresser.split("\n"):
                     if rad.strip():
                         lat, lon = hämta_gps(rad.strip())
+                        # Skapa ett unikt ID baserat på tid + slump för att undvika dubbletter
+                        u_id = f"{datetime.now().strftime('%f')}_{len(st.session_state.uppdrag)}"
                         st.session_state.uppdrag.append({
+                            "id": u_id,
                             "vecka": datetime.now().strftime("%W"),
                             "dag": datetime.now().strftime("%Y-%m-%d"),
                             "chauffor": val_c,
@@ -67,18 +70,17 @@ with tab1:
                         })
                 st.success("Adresser tillagda!")
 
-        # PRIORITERINGSLISTA
         if st.session_state.uppdrag:
             st.divider()
-            st.subheader("Hantera Prioritering & Karta")
+            st.subheader("Hantera Prioritering")
             df_plan = pd.DataFrame(st.session_state.uppdrag)
-            
-            # Visa endast väntande för prioritering
             v_mask = df_plan['status'] == "Väntar"
+            
             for i, row in df_plan[v_mask].iterrows():
                 c1, c2 = st.columns([3, 1])
                 c1.write(f"📍 {row['adress']} ({row['chauffor']})")
-                st.session_state.uppdrag[i]['prio'] = c2.number_input("Prio", 1, 20, row['prio'], key=f"p_{i}")
+                # Vi använder row['id'] här också för att hålla reda på rätt rad
+                st.session_state.uppdrag[i]['prio'] = c2.number_input(f"Prio för {i}", 1, 50, row['prio'], key=f"prio_input_{row['id']}")
             
             if st.button("🔄 Sortera Rutter efter Prioritet"):
                 st.session_state.uppdrag.sort(key=lambda x: (x['chauffor'], x['prio']))
@@ -88,7 +90,7 @@ with tab1:
         st.info("Logga in för att hantera fleet.")
 
 # ==========================================
-# FLIK 2: CHAUFFÖRSVY (Leverans & GPS)
+# FLIK 2: CHAUFFÖRSVY
 # ==========================================
 with tab2:
     inlogg = st.selectbox("Inloggad som:", st.session_state.chaufforer)
@@ -99,20 +101,18 @@ with tab2:
     else:
         for i, u in enumerate(mina):
             with st.expander(f"ORDNING {u['prio']}: {u['adress']}", expanded=(i==0)):
-                # Google Maps Knapp
                 link = f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(u['adress'] + ', Göteborg')}"
                 st.link_button("🗺️ Öppna i Google Maps", link)
                 
-                if st.button("✅ MARKERA KLAR", key=f"k_{u['adress']}"):
+                # FIX: Här använder vi u['id'] istället för adressen som nyckel
+                if st.button("✅ MARKERA KLAR", key=f"k_{u['id']}"):
                     nu = datetime.now()
-                    # Tidsberäkning
                     idag_klara = [x for x in st.session_state.uppdrag if x['chauffor'] == inlogg and x['status'] == "Levererad" and x['dag'] == u['dag']]
                     
                     if idag_klara:
                         sista_tid = datetime.strptime(idag_klara[-1]['klar_tid'], "%H:%M")
                         u['tids_atgang'] = (nu.hour*60 + nu.minute) - (sista_tid.hour*60 + sista_tid.minute)
                     else:
-                        # Första stoppet räknas från 06:45
                         u['tids_atgang'] = (nu.hour*60 + nu.minute) - (6*60 + 45)
                     
                     u['status'] = "Levererad"
@@ -125,21 +125,13 @@ with tab2:
 with tab3:
     if st.session_state.uppdrag:
         df_stat = pd.DataFrame(st.session_state.uppdrag)
-        
-        # KARTAN (Säkerställer att den fungerar i Gbg)
         st.subheader("Ruttkarta Göteborg")
         map_points = df_stat.dropna(subset=['lat', 'lon'])
         if not map_points.empty:
             st.map(map_points[['lat', 'lon']])
         
-        # ANALYS
         st.divider()
         klara_df = df_stat[df_stat['status'] == "Levererad"]
         if not klara_df.empty:
             st.subheader("Veckoanalys (Tidsåtgång)")
             st.bar_chart(klara_df.set_index('adress')['tids_atgang'])
-            
-            # Jämför veckor
-            v_stats = klara_df.groupby('vecka').size().reset_index(name='Antal')
-            st.write("**Leveranser per vecka:**")
-            st.table(v_stats)
