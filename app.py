@@ -1,169 +1,133 @@
 import streamlit as st
 import pandas as pd
-from geopy.geocoders import Nominatim
 from datetime import datetime
 import urllib.parse
 import uuid
 
-# Optimera för stora skärmar
-st.set_page_config(page_title="Textilia Gbg - Control Tower", layout="wide")
+# Konfiguration för bred bildskärm
+st.set_page_config(page_title="Textilia Logistik - Priority Edition", layout="wide")
 
 # --- INITIALISERING ---
 if 'fleet' not in st.session_state:
     st.session_state.fleet = []
-if 'jobs' not in st.session_state:
-    st.session_state.jobs = []
-if 'depo' not in st.session_state:
-    st.session_state.depo = {"address": "Fjällbo Park 5, Göteborg", "lat": 57.7409, "lon": 12.0634}
+if 'rutten' not in st.session_state:
+    st.session_state.rutten = []
 
-# Geokodning
-def get_gps(address):
-    try:
-        gn = Nominatim(user_agent="textilia_control_tower")
-        loc = gn.geocode(address + ", Göteborg, Sweden")
-        return (loc.latitude, loc.longitude) if loc else (None, None)
-    except: return (None, None)
+st.title("🚛 Textilia Gbg - Ruttplanering med Prio")
 
-# --- UI STYLING ---
-st.markdown("""
-    <style>
-    .main { background-color: #f5f7f9; }
-    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; }
-    .status-card { padding: 20px; border-radius: 10px; background-color: white; border: 1px solid #e6e9ef; }
-    </style>
-    """, unsafe_allow_html=True)
-
-st.title("🚛 Textilia Gbg Logistik - Control Tower")
-
-tab1, tab2, tab3 = st.tabs(["🏗️ Planering & Fleet", "🚚 Chaufförsvy", "🖥️ Chefens Dashboard"])
+tab1, tab2, tab3 = st.tabs(["📋 Chef: Planera & Prio", "📍 Chaufför: Körning", "🖥️ Chef: Dashboard"])
 
 # ==========================================
-# FLIK 1: PLANERING & FLEET (Bättre layout)
+# FLIK 1: CHEFSVY (Planera, Fleet & Prio)
 # ==========================================
 with tab1:
     pwd = st.sidebar.text_input("Chefskod:", type="password")
     if pwd == "textilia2026":
-        col_fleet, col_plan = st.columns([1, 2])
+        col_fleet, col_input = st.columns([1, 2])
         
         with col_fleet:
-            st.subheader("🚐 Hantera Fleet")
-            with st.container():
-                v_name = st.text_input("Fordonsnamn/ID", placeholder="Ex: Bil 104")
-                v_type = st.radio("Typ av fordon", ["Singelbil", "Ekipage (Bil + Släp)"])
+            st.subheader("🚐 Fleet & Kapacitet")
+            v_name = st.text_input("Fordonsnamn", placeholder="Ex: Bil 1")
+            v_type = st.radio("Typ", ["Singelbil", "Lastbil + Släp"])
+            c1, c2 = st.columns(2)
+            cap_b = c1.number_input("Kapacitet Bil", value=70)
+            cap_s = c2.number_input("Kapacitet Släp", value=0) if v_type == "Lastbil + Släp" else 0
+            
+            if st.button("➕ Lägg till fordon"):
+                st.session_state.fleet.append({"name": v_name, "cap": cap_b + cap_s})
+                st.success(f"{v_name} tillagd (Totalt {cap_b + cap_s} cont)")
+
+        with col_input:
+            st.subheader("📍 Skapa rutt med Prioritet")
+            rutt_nr = st.number_input("Rutt Nummer", min_value=1, step=1)
+            
+            with st.form("addr_form"):
+                addr = st.text_input("Adress")
+                prio = st.number_input("Prioritet (1 = Först i listan)", min_value=1, value=1)
+                info = st.text_area("Viktig info (Portkod etc.)")
+                submitted = st.form_submit_button("Lägg till i Rutt")
                 
-                c1, c2 = st.columns(2)
-                cap_truck = c1.number_input("Kapacitet Bil", value=70)
-                cap_trailer = c2.number_input("Kapacitet Släp", value=0) if v_type == "Ekipage (Bil + Släp)" else 0
-                
-                total_cap = cap_truck + cap_trailer
-                st.info(f"**Total kapacitet:** {total_cap} containers")
-                
-                if st.button("➕ Lägg till i Fleet"):
-                    st.session_state.fleet.append({
-                        "id": str(uuid.uuid4())[:8],
-                        "name": v_name,
-                        "type": v_type,
-                        "total_cap": total_cap,
-                        "truck_cap": cap_truck,
-                        "trailer_cap": cap_trailer
+                if submitted and addr:
+                    st.session_state.rutten.append({
+                        "id": str(uuid.uuid4()),
+                        "rutt": rutt_nr,
+                        "adress": addr,
+                        "prio": prio,
+                        "info": info,
+                        "status": "Väntar",
+                        "tid": None,
+                        "problem": False
                     })
-                    st.success(f"{v_name} tillagd!")
+                    st.rerun()
 
-            st.divider()
-            st.write("**Aktiva Fordon:**")
-            for v in st.session_state.fleet:
-                st.write(f"▪️ {v['name']} ({v['type']}) - {v['total_cap']} cont")
-
-        with col_plan:
-            st.subheader("📍 Ruttplanering & Adressimport")
-            mass_addr = st.text_area("Klistra in adresser (en per rad):", height=200, placeholder="Gothia Towers\nSahlgrenska\n...")
+        st.divider()
+        st.subheader("📝 Redigera körordning")
+        if st.session_state.rutten:
+            for i, stopp in enumerate(st.session_state.rutten):
+                if stopp['status'] == "Väntar":
+                    c1, c2, c3 = st.columns([3, 1, 1])
+                    c1.write(f"Rutt {stopp['rutt']}: **{stopp['adress']}**")
+                    # Här kan du ändra prio direkt i listan
+                    stopp['prio'] = c2.number_input("Ändra Prio", min_value=1, value=stopp['prio'], key=f"edit_{stopp['id']}")
+                    if c3.button("Ta bort", key=f"del_{stopp['id']}"):
+                        st.session_state.rutten.pop(i)
+                        st.rerun()
             
-            sel_v = st.selectbox("Tilldela till fordon:", [v['name'] for v in st.session_state.fleet] if st.session_state.fleet else ["Inga fordon tillgängliga"])
-            
-            if st.button("🚀 Generera och Spara Rutt"):
-                new_entries = []
-                for addr in mass_addr.split("\n"):
-                    if addr.strip():
-                        lat, lon = get_gps(addr.strip())
-                        new_entries.append({
-                            "id": str(uuid.uuid4()), # Unikt ID för varje stopp
-                            "driver": sel_v,
-                            "address": addr.strip(),
-                            "status": "Väntar",
-                            "lat": lat, "lon": lon,
-                            "time": None,
-                            "photo": None
-                        })
-                st.session_state.jobs.extend(new_entries)
-                st.success(f"Rutt sparad för {sel_v}!")
+            if st.button("🔴 Rensa All Data"):
+                st.session_state.rutten = []
+                st.rerun()
 
     else:
-        st.warning("Vänligen ange chefskod i sidomenyn för att komma åt planeringen.")
+        st.info("Logga in för att planera.")
 
 # ==========================================
-# FLIK 2: CHAUFFÖRSVY (Smidig check-in)
+# FLIK 2: CHAUFFÖRSVY (Sorterad efter Prio)
 # ==========================================
 with tab2:
-    if not st.session_state.fleet:
-        st.info("Inga fordon eller chaufförer är upplagda än.")
+    if not st.session_state.rutten:
+        st.info("Inga rutter inlagda.")
     else:
-        driver_sel = st.selectbox("Logga in som chaufför:", [v['name'] for v in st.session_state.fleet])
-        my_jobs = [j for j in st.session_state.jobs if j['driver'] == driver_sel and j['status'] == "Väntar"]
+        val_rutt = st.selectbox("Välj din rutt:", sorted(list(set([r['rutt'] for r in st.session_state.rutten]))))
         
-        if not my_jobs:
-            st.success("🎉 Snyggt! Alla dina leveranser är klara.")
-        else:
-            st.subheader(f"Dagens uppdrag för {driver_sel}")
-            for job in my_jobs:
-                with st.expander(f"📍 Leverans: {job['address']}", expanded=True):
-                    # GPS
-                    enc_addr = urllib.parse.quote(f"{job['address']}, Göteborg")
-                    st.link_button("🧭 Öppna GPS", f"https://www.google.com/maps/search/?api=1&query={enc_addr}")
-                    
-                    # pinDeliver dokumentation
-                    st.write("---")
-                    pic = st.camera_input("Ta leveransbild (Bevis)", key=f"cam_{job['id']}")
-                    
-                    if st.button("✅ BEKRÄFTA LEVERERAD", key=f"btn_{job['id']}"):
-                        job['status'] = "Levererad"
-                        job['time'] = datetime.now().strftime("%H:%M")
-                        job['photo'] = pic
+        # SORTERING: Här sorteras listan efter Prio-siffran
+        mina_stopp = [s for s in st.session_state.rutten if s['rutt'] == val_rutt and s['status'] == "Väntar"]
+        mina_stopp.sort(key=lambda x: x['prio'])
+        
+        st.subheader(f"Körschema Rutt {val_rutt} (Sorterat efter Prio)")
+        
+        for i, stopp in enumerate(mina_stopp):
+            with st.expander(f"PRIO {stopp['prio']}: {stopp['adress']}", expanded=(i==0)):
+                if stopp['info']:
+                    st.warning(f"**INFO:** {stopp['info']}")
+                
+                enc_addr = urllib.parse.quote(f"{stopp['adress']}, Göteborg")
+                st.link_button("🧭 Navigera", f"https://www.google.com/maps/search/?api=1&query={enc_addr}")
+                
+                c1, c2 = st.columns(2)
+                if c1.button("✅ Levererat", key=f"ok_{stopp['id']}"):
+                    stopp['status'] = "Levererad"
+                    stopp['tid'] = datetime.now().strftime("%H:%M")
+                    st.rerun()
+                
+                if c2.button("⚠️ Problem", key=f"err_{stopp['id']}"):
+                    stopp['problem'] = True
+                
+                if stopp['problem']:
+                    st.camera_input("Ta bild på problemet", key=f"cam_{stopp['id']}")
+                    if st.button("Skicka felrapport", key=f"send_{stopp['id']}"):
+                        stopp['status'] = "Problem"
+                        stopp['tid'] = datetime.now().strftime("%H:%M")
                         st.rerun()
 
 # ==========================================
-# FLIK 3: CHEFENS DASHBOARD (Överblick)
+# FLIK 3: DASHBOARD
 # ==========================================
 with tab3:
-    st.subheader("🖥️ Live Kontrollpanel")
-    
-    if not st.session_state.jobs:
-        st.info("Väntar på data från fältet...")
-    else:
-        # Metriker längst upp
-        tot = len(st.session_state.jobs)
-        klar = len([j for j in st.session_state.jobs if j['status'] == "Levererad"])
-        
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Totala Leveranser", tot)
-        m2.metric("Genomförda", klar)
-        m3.metric("Återstående", tot - klar)
-        
-        st.divider()
-        
-        # Karta och Detaljerad logg
-        col_map, col_log = st.columns([1, 1])
-        
-        with col_map:
-            st.write("**Ruttkarta (Realtid)**")
-            df = pd.DataFrame(st.session_state.jobs)
-            st.map(df.dropna(subset=['lat', 'lon']))
-
-        with col_log:
-            st.write("**Leveranslogg (Senaste händelser)**")
-            for j in reversed(st.session_state.jobs):
-                status_color = "🟢" if j['status'] == "Levererad" else "🟡"
-                with st.container():
-                    st.markdown(f"{status_color} **{j['time'] or 'Väntar'}** - {j['driver']} @ {j['address']}")
-                    if j['photo']:
-                        with st.expander("Visa Bildbevis"):
-                            st.image(j['photo'], width=200)
+    st.subheader("🖥️ Status & Uppföljning")
+    if st.session_state.rutten:
+        df = pd.DataFrame(st.session_state.rutten)
+        for r_nr in sorted(df['rutt'].unique()):
+            r_data = df[df['rutt'] == r_nr]
+            klar = len(r_data[r_data['status'] == "Levererad"])
+            st.write(f"### Rutt {r_nr}: {klar}/{len(r_data)} klara")
+            st.dataframe(r_data[['prio', 'adress', 'status', 'tid', 'info']], use_container_width=True)
