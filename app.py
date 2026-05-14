@@ -101,4 +101,4 @@ with tab4:
     total = len(st.session_state.stopp)
     st.metric("Leveransgrad", f"{klar} av {total}")
     st.progress(0 if total == 0 else klar/total)
-    st.write(f"🌱 Uppskattad CO2-besparing: {klar * 0.5:.1 f} kg")
+    st.write(f"🌱 Uppskattad CO2-besparing: {klar * 0.5:.1f} kg")
