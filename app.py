@@ -1,159 +1,159 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
-import json
+import urllib.parse  # FIXAR DITT NAMEERROR
 import uuid
+import json
 
 # --- GRUNDINSTÄLLNINGAR ---
-st.set_page_config(page_title="Textilia Gbg PRO", layout="wide")
+st.set_page_config(page_title="Textilia Gbg Logistik", layout="wide")
 
-# Funktion för svensk tid (UTC+2)
-def hämta_tid():
+# Fixar svensk tid (UTC+2 för sommartid)
+def svensk_tid():
     return (datetime.utcnow() + timedelta(hours=2)).strftime("%H:%M")
 
-# --- MINNESHANTERING (Garanterar att inget blandas ihop) ---
+# --- MINNESHANTERING ---
 if 'rutter' not in st.session_state:
-    st.session_state.rutter = {} # Struktur: {"Rutt 1": [stopp1, stopp2], "Rutt 2": []}
+    st.session_state.rutter = {} 
 if 'fleet' not in st.session_state:
-    st.session_state.fleet = {} # Struktur: {"Rutt 1": {"bil": 70, "släp": 30}}
+    st.session_state.fleet = {}
 
-st.title("🚛 Textilia Gbg Logistik - PRO v19.0")
-
-# --- SIDOMENY: Hantera Rutter & Fordon ---
-with st.sidebar:
-    st.header("⚙️ Administration")
-    ny_rutt = st.text_input("Namn på ny rutt:", placeholder="Ex: Rutt 1")
-    if st.button("Skapa Rutt"):
-        if ny_rutt and ny_rutt not in st.session_state.rutter:
-            st.session_state.rutter[ny_rutt] = []
-            st.session_state.fleet[ny_rutt] = {"bil": 70, "släp": 0}
-            st.rerun()
-
-    st.divider()
-    if st.session_state.rutter:
-        valda_rutt = st.selectbox("Välj rutt att hantera:", list(st.session_state.rutter.keys()))
-        
-        st.subheader(f"Kapacitet för {valda_rutt}")
-        st.session_state.fleet[valda_rutt]["bil"] = st.number_input("Bil (vagnar)", value=st.session_state.fleet[valda_rutt]["bil"])
-        st.session_state.fleet[valda_rutt]["släp"] = st.number_input("Släp (vagnar)", value=st.session_state.fleet[valda_rutt]["släp"])
-        tot_cap = st.session_state.fleet[valda_rutt]["bil"] + st.session_state.fleet[valda_rutt]["släp"]
-        st.info(f"Total kapacitet: **{tot_cap}** vagnar")
-        
-        if st.button("🗑️ Radera denna rutt"):
-            del st.session_state.rutter[valda_rutt]
-            del st.session_state.fleet[valda_rutt]
-            st.rerun()
-
-    st.divider()
-    st.header("💾 Backup")
-    if st.download_button("📥 Spara backup till datorn", json.dumps(st.session_state.rutter), file_name="textilia_backup.json"):
-        st.success("Backup nedladdad!")
-
-tab1, tab2, tab3 = st.tabs(["🏗️ 1. Planering (Chef)", "🚚 2. Körning (Chaufför)", "📊 3. Dashboard"])
+# --- NAVBAR / APP-VÄLJARE ---
+st.sidebar.title("🚛 Textilia Gbg")
+app_mode = st.sidebar.radio("Välj arbetsläge:", ["🏗️ Planering (Chef)", "🚚 Leverans (Chaufför)"])
 
 # ==========================================
-# FLIK 1: PLANERING (CHEF)
+# APP 1: PLANERING & LOGISTIK (CHEF)
 # ==========================================
-with tab1:
-    if not st.session_state.rutter:
-        st.info("Börja med att skapa en rutt i sidomenyn till vänster.")
-    else:
-        st.header(f"Planerar: {valda_rutt}")
+if app_mode == "🏗️ Planering (Chef)":
+    st.header("🏗️ Logistikplanering & Orderstyrning")
+    
+    pwd = st.sidebar.text_input("Chefskod:", type="password")
+    if pwd == "textilia2026":
         
-        # 1. Mass-import
-        with st.expander("➕ Lägg till adresser (Mass-import)"):
-            adresser = st.text_area("Klistra in adresser (en per rad):")
-            gemensam_info = st.text_input("Gemensam info för dessa (t.ex. 'Smutstvätt retur')")
-            if st.button("Lägg till i rutt"):
-                for rad in adresser.split("\n"):
-                    if rad.strip():
-                        nasta_nr = max([s['Ordning'] for s in st.session_state.rutter[valda_rutt]], default=0) + 1
-                        st.session_state.rutter[valda_rutt].append({
-                            "ID": str(uuid.uuid4())[:8],
-                            "Ordning": nasta_nr,
-                            "Adress": rad.strip(),
-                            "Info": gemensam_info,
-                            "Status": "Väntar",
-                            "Tid": "",
-                            "Vagnar": 10
-                        })
-                st.rerun()
-
-        # 2. Manuellt ändra ordning (Excel-vyn)
-        st.subheader("Redigera körordning & information")
-        if st.session_state.rutter[valda_rutt]:
-            df = pd.DataFrame(st.session_state.rutter[valda_rutt])
-            # Denna editor låter dig ändra siffran i "Ordning" för att flytta stopp
-            redigerad_df = st.data_editor(
-                df,
-                column_order=["Ordning", "Adress", "Info", "Vagnar", "Status"],
-                num_rows="dynamic",
-                use_container_width=True,
-                key=f"editor_{valda_rutt}"
-            )
+        # 1. Skapa och hantera rutter
+        with st.sidebar:
+            st.subheader("Hantera Rutter")
+            ny_r = st.text_input("Namn på rutt (ex: Rutt 1):")
+            if st.button("Skapa Rutt"):
+                if ny_r and ny_r not in st.session_state.rutter:
+                    st.session_state.rutter[ny_r] = []
+                    st.session_state.fleet[ny_r] = {"bil": 70, "släp": 0}
+                    st.rerun()
             
-            if st.button("💾 Spara ändringar & Sortera"):
-                ny_lista = redigerad_df.sort_values(by="Ordning").to_dict('records')
-                st.session_state.rutter[valda_rutt] = ny_lista
-                st.success("Listan är nu uppdaterad och sorterad!")
-                st.rerun()
+            st.divider()
+            if st.session_state.rutter:
+                valda = st.selectbox("Redigera rutt:", list(st.session_state.rutter.keys()))
+                st.session_state.fleet[valda]["bil"] = st.number_input("Kapacitet Bil:", value=st.session_state.fleet[valda]["bil"])
+                st.session_state.fleet[valda]["släp"] = st.number_input("Kapacitet Släp:", value=st.session_state.fleet[valda]["släp"])
+                if st.button("🗑️ Radera rutt"):
+                    del st.session_state.rutter[valda]
+                    st.rerun()
+
+        if st.session_state.rutter:
+            # 2. Lägg till adresser
+            with st.expander("➕ Mass-import adresser"):
+                bulk = st.text_area("Klistra in adresser (en per rad):")
+                info_text = st.text_input("Viktig info till chauffören (t.ex. Portkod 1234)")
+                if st.button("Lägg till i planering"):
+                    for rad in bulk.split("\n"):
+                        if rad.strip():
+                            nr = max([s['Ordning'] for s in st.session_state.rutter[valda]], default=0) + 1
+                            st.session_state.rutter[valda].append({
+                                "ID": str(uuid.uuid4())[:8],
+                                "Ordning": nr,
+                                "Adress": rad.strip(),
+                                "Info": info_text,
+                                "Status": "Väntar",
+                                "Tid": "",
+                                "Vagnar_In": 0
+                            })
+                    st.rerun()
+
+            # 3. MANUELL ORDNING (THE MASTER PLAN)
+            st.subheader(f"Körschema för {valda}")
+            df = pd.DataFrame(st.session_state.rutter[valda])
+            if not df.empty:
+                # Här kan du ändra Ordning, Adress och Info direkt
+                edited_df = st.data_editor(
+                    df,
+                    column_order=["Ordning", "Adress", "Info", "Status", "Tid"],
+                    use_container_width=True,
+                    key=f"editor_{valda}"
+                )
+                
+                if st.button("💾 Spara & Optimera Körordning"):
+                    st.session_state.rutter[valda] = edited_df.sort_values(by="Ordning").to_dict('records')
+                    st.success("Körordningen sparad och uppdaterad för chauffören!")
+    else:
+        st.info("Logga in för att se planeringen.")
 
 # ==========================================
-# FLIK 2: KÖRNING (CHAUFFÖR)
+# APP 2: LEVERANS (CHAUFFÖR)
 # ==========================================
-with tab2:
+else:
+    st.header("🚚 Chaufför: Leverans & Retur")
+    
     if not st.session_state.rutter:
-        st.info("Inga rutter är redo än.")
+        st.info("Inga rutter är planerade än.")
     else:
-        c_rutt = st.selectbox("Vilken rutt kör du idag?", list(st.session_state.rutter.keys()))
+        c_rutt = st.selectbox("Välj din rutt för idag:", list(st.session_state.rutter.keys()))
+        
+        # 1. LASTNINGSLISTA (LIFO-princip: Sista stoppet längst fram)
+        with st.expander("📦 SE LASTNINGSLISTA (Packa bilen rätt)"):
+            lastning = sorted(st.session_state.rutter[c_rutt], key=lambda x: x['Ordning'], reverse=True)
+            for s in lastning:
+                st.write(f"▪️ Lasta: **{s['Adress']}**")
+            st.caption("Lastas i denna ordning: Sista stoppet först (längst in). Första stoppet sist (vid dörren).")
+
+        # 2. KÖRNING
+        st.divider()
         mina_stopp = [s for s in st.session_state.rutter[c_rutt] if s['Status'] == "Väntar"]
         
         if not mina_stopp:
-            st.success("🎉 Alla leveranser klara för denna rutt!")
+            st.success("🎉 Alla leveranser klara! Kör tillbaka till tvätteriet.")
         else:
-            st.header(f"Körschema: {c_rutt}")
-            # Visar stoppen i den ordning chefen bestämt
-            for i, stopp in enumerate(mina_stopp):
-                with st.expander(f"STOPP {stopp['Ordning']}: {stopp['Adress']}", expanded=(i==0)):
-                    if stopp['Info']:
-                        st.warning(f"ℹ️ **Viktigt:** {stopp['Info']}")
-                    
-                    st.write(f"Vagnar ut: {stopp['Vagnar']}")
-                    
-                    # GPS
-                    enc_addr = urllib.parse.quote(f"{stopp['Adress']}, Göteborg")
-                    st.link_button("🧭 Navigera", f"https://www.google.com/maps/search/?api=1&query={enc_addr}")
-                    
-                    col1, col2 = st.columns(2)
-                    if col1.button("✅ Levererat", key=f"ok_{stopp['ID']}", use_container_width=True):
-                        stopp['Status'] = "Levererad"
-                        stopp['Tid'] = hämta_tid()
-                        st.rerun()
-                    
-                    if col2.button("⚠️ Problem", key=f"err_{stopp['ID']}", use_container_width=True):
-                        st.error("Beskriv felet och ta en bild:")
-                        st.camera_input("Foto på hinder", key=f"cam_{stopp['ID']}")
-                        if st.button("Skicka felrapport", key=f"rep_{stopp['ID']}"):
-                            stopp['Status'] = "Problem"
-                            stopp['Tid'] = hämta_tid()
-                            st.rerun()
+            nasta = mina_stopp[0]
+            st.subheader(f"Nästa stopp: {nasta['Adress']}")
+            
+            if nasta['Info']:
+                st.warning(f"ℹ️ **INFO:** {nasta['Info']}")
+            
+            # GPS - FIXAT NAMEERROR HÄR
+            q_addr = urllib.parse.quote(f"{nasta['Adress']}, Göteborg")
+            st.link_button("🗺️ Öppna GPS (Google Maps)", f"https://www.google.com/maps/search/?api=1&query={q_addr}")
+            
+            st.divider()
+            # Returflöde (Smutstvätt in)
+            v_in = st.number_input("Hämtat Smutstvätt (Antal vagnar):", value=1, min_value=0)
+            
+            col1, col2 = st.columns(2)
+            if col1.button("✅ LEVERERAT & KLART", use_container_width=True):
+                nasta['Status'] = "Levererad"
+                nasta['Vagnar_In'] = v_in
+                nasta['Tid'] = svensk_tid()
+                st.rerun()
+            
+            if col2.button("⚠️ PROBLEM", use_container_width=True):
+                st.session_state[f"prob_{nasta['ID']}"] = True
+            
+            if st.session_state.get(f"prob_{nasta['ID']}"):
+                st.error("Beskriv felet och ta en bild:")
+                st.camera_input("Foto på hinder/skada", key=f"cam_{nasta['ID']}")
+                if st.button("Skicka Felrapport"):
+                    nasta['Status'] = "Problem"
+                    nasta['Tid'] = svensk_tid()
+                    st.rerun()
 
 # ==========================================
-# FLIK 3: DASHBOARD (CHEF)
+# DASHBOARD (STATUS FÖR KONTORET)
 # ==========================================
-with tab3:
-    st.header("🖥️ Realtidsstatus - Göteborg")
-    if st.session_state.rutter:
-        for r_namn, stopp_lista in st.session_state.rutter.items():
-            if stopp_lista:
-                klara = len([s for s in stopp_lista if s['Status'] == "Levererad"])
-                tot = len(stopp_lista)
-                
-                with st.container(border=True):
-                    c1, c2 = st.columns([1, 3])
-                    c1.metric(r_namn, f"{klara}/{tot} Klara")
-                    with c2:
-                        df_res = pd.DataFrame(stopp_lista)
-                        st.dataframe(df_res[["Ordning", "Adress", "Status", "Tid"]], hide_index=True)
-    else:
-        st.info("Ingen data att visa.")
+if st.session_state.rutter and app_mode == "🏗️ Planering (Chef)":
+    st.divider()
+    st.subheader("🖥️ Live Status - Alla Rutter")
+    for r_namn, stopp_lista in st.session_state.rutter.items():
+        klara = len([s for s in stopp_lista if s['Status'] == "Levererad"])
+        tot = len(stopp_lista)
+        v_in_tot = sum([s.get('Vagnar_In', 0) for s in stopp_lista])
+        
+        st.write(f"**{r_namn}**: {klara}/{tot} klara. Smutstvätt på väg in: **{v_in_tot} vagnar**.")
