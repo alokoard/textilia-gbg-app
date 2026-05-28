@@ -4,114 +4,154 @@ import pandas as pd
 # 1. Sidkonfiguration
 st.set_page_config(page_title="Logistikplanering & Orderstyrning", layout="wide")
 
-# 2. Initiera session_state så att data sparas mellan flikar och sidomladdningar
+# =========================================================================
+# SYSTEMLAGRING (session_state) - Ser till att ingen data försvinner
+# =========================================================================
+# Lagring för alla bilars körscheman
+if 'all_trucks_data' not in st.session_state:
+    st.session_state['all_trucks_data'] = {
+        "Bil 1": pd.DataFrame({
+            "Ordningsnummer": [1, 2, 3],
+            "Adress": [
+                "Landvetter Airport 3B1210 438 80 HÄRRYDA", 
+                "Sandgärdsgatan 15 503 34 BORÅS", 
+                "Härrydavägen 250 438 92 HÄRRYDA"
+            ],
+            "Status": ["Problem", "Väntar", "Väntar"]
+        }),
+        "Bil 2": pd.DataFrame({
+            "Ordningsnummer": [1, 2],
+            "Adress": [
+                "Fibervägen 7 435 33 MÖLNLYCKE",
+                "Carlbergsgatan 10-14 412 66 GÖTEBORG"
+            ],
+            "Status": ["Väntar", "Väntar"]
+        })
+    }
+
+# Lagring för foton (strukturerat per bil och adress)
 if 'saved_photos' not in st.session_state:
     st.session_state['saved_photos'] = {}
 
-# Om det inte finns någon sparad körlista än, skapar vi en standardlista
-if 'korlista_df' not in st.session_state:
-    initial_data = {
-        "Ordningsnummer": [0, 1, 2, 3],
-        "Adress": [
-            "Landvetter Airport 3B1210 438 80 HÄRRYDA", 
-            "Sandgärdsgatan 15 503 34 BORÅS", 
-            "Härrydavägen 250 438 92 HÄRRYDA",
-            "Kungsportsavenyen 10 411 36 GÖTEBORG"
-        ],
-        "Status": ["Problem", "Väntar", "Väntar", "Klar"]
-    }
-    st.session_state['korlista_df'] = pd.DataFrame(initial_data)
 
 # --- HUVUDRUBRIK ---
-st.title("Logistikplanering & Orderstyrning")
+st.title("🚛 Logistikplanering & Orderstyrning")
 
-# 3. Skapa flikar för de olika vyerna (Chef och Chaufför)
-flik_chef, flik_chauffor = st.tabs(["👨‍💼 Chefsvy - Hantera & Mata in listor", "🚚 Chaufförsvy - Körschema"])
+# Skapa flikar för Chef och Chaufför
+flik_chef, flik_chauffor = st.tabs(["👨‍💼 Chefsvy - Hantera Bilar & Rutter", "🚚 Chaufförsvy - Körschema & Kamera"])
 
 
 # =========================================================================
-# 👨‍💼 FLIK 1: CHEFENS DEL (Inmatning och hantering av listor)
+# 👨‍💼 FLIK 1: CHEFENS DEL (Hantera flera bilar och rutter)
 # =========================================================================
 with flik_chef:
-    st.header("Administrera Körlistor")
+    st.header("Administrera Fordon och Körlistor")
     
-    st.subheader("Skapa eller uppdatera lista")
-    st.write("Här kan du klistra in eller mata in nya adresser och rutter till chaufförerna.")
+    # Sektion A: Lägg till en helt ny bil i systemet
+    st.subheader("➕ Lägg till ny bil")
+    nytt_bilsnamn = st.text_input("Ange namn på ny bil (t.ex. 'Bil 3'):").strip()
+    if st.button("Registrera nytt fordon"):
+        if nytt_bilsnamn and nytt_bilsnamn not in st.session_state['all_trucks_data']:
+            st.session_state['all_trucks_data'][nytt_bilsnamn] = pd.DataFrame(columns=["Ordningsnummer", "Adress", "Status"])
+            st.success(f"{nytt_bilsnamn} har lagts till i systemet!")
+            st.rerun()
+        elif nytt_bilsnamn:
+            st.warning("Det fordonet finns redan.")
+
+    st.write("---")
+
+    # Sektion B: Uppdatera rutt för en specifik bil
+    st.subheader("✏️ Uppdatera rutt för valt fordon")
+    valda_bilar_lista = list(st.session_state['all_trucks_data'].keys())
+    chef_vald_bil = st.selectbox("Välj vilken bil du vill hantera:", valda_bilar_lista, key="chef_bil_select")
     
-    # Textruta för att kunna klistra in adresser direkt (eller rader)
+    # Hämta nuvarande adresser för den valda bilen för att visa i textrutan
+    nuvarande_df = st.session_state['all_trucks_data'][chef_vald_bil]
+    nuvarande_text = "\n".join(nuvarande_df["Adress"].tolist()) if not nuvarande_df.empty else ""
+    
     ny_data_text = st.text_area(
-        "Klistra in adresser (en per rad) för att uppdatera listan:",
-        value="\n".join(st.session_state['korlista_df']["Adress"].tolist()),
+        f"Klistra in adresser för {chef_vald_bil} (en adress per rad):",
+        value=nuvarande_text,
         height=150
     )
     
-    if st.button("Uppdatera körschema för Bil 1"):
-        # Dela upp texten till en lista av adresser
+    if st.button(f"Spara och optimera körordning för {chef_vald_bil}"):
         nya_adresser = [line.strip() for line in ny_data_text.split("\n") if line.strip()]
         
-        # Skapa en ny DataFrame med nollställd status
+        # Bygg upp den nya tabellen för just den valda bilen
         ny_df = pd.DataFrame({
-            "Ordningsnummer": list(range(len(nya_adresser))),
+            "Ordningsnummer": list(range(1, len(nya_adresser) + 1)),
             "Adress": nya_adresser,
             "Status": ["Väntar"] * len(nya_adresser)
         })
         
-        # Spara i session_state så att Chaufförs-fliken ser ändringen direkt
-        st.session_state['korlista_df'] = ny_df
-        st.success("Körschemat har uppdaterats och skickats till chauffören!")
+        # Spara tillbaka till den specifika bilen i vårt systemminne
+        st.session_state['all_trucks_data'][chef_vald_bil] = ny_df
+        st.success(f"Körschemat för {chef_vald_bil} har uppdaterats!")
+        st.rerun()
 
 
 # =========================================================================
-# 🚚 FLIK 2: CHAUFFÖRENS DEL (Körschema, Status & Kamera)
+# 🚚 FLIK 2: CHAUFFÖRENS DEL (Välj bil, se rutt & ta foto)
 # =========================================================================
 with flik_chauffor:
-    # Hämta den aktuella listan från minnet
-    current_df = st.session_state['korlista_df']
+    st.header("Chaufförsportal")
     
-    st.subheader("Körschema för Bil 1")
+    # Chauffören måste välja vilken bil de kör just nu
+    alla_tillgangliga_bilar = list(st.session_state['all_trucks_data'].keys())
+    chauffor_vald_bil = st.selectbox("Välj vilket fordon du kör idag:", alla_tillgangliga_bilar, key="chauffor_bil_select")
     
-    # Visa tabellen precis som på din bild
-    st.dataframe(current_df, use_container_width=True, hide_index=True)
+    # Hämta rätt körschema baserat på valet av bil
+    bil_df = st.session_state['all_trucks_data'][chauffor_vald_bil]
     
-    # --- NY FOTOFUNKTION SOM DU BAD OM ---
-    st.write("---")
-    st.subheader("📸 Fotoverifiering & Avvikelsehantering")
+    st.subheader(f"Körschema för {chauffor_vald_bil}")
     
-    # Rullista med adresserna från den aktuella listan
-    alla_adresser = current_df["Adress"].tolist()
-    if alla_adresser:
-        vald_adress = st.selectbox("Välj vilken adress fotot tillhör:", alla_adresser)
+    if not bil_df.empty:
+        # Visa tabellen för den valda bilen
+        st.dataframe(bil_df, use_container_width=True, hide_index=True)
         
-        # Kamera-komponenten
-        photo_input = st.camera_input("Ta kort för att dokumentera status eller problem")
+        # --- FOTODOKUMENTATION ---
+        st.write("---")
+        st.subheader("📸 Fotoverifiering & Avvikelsehantering")
+        
+        # Hämta adresserna för just denna bil till rullistan
+        bilens_adresser = bil_df["Adress"].tolist()
+        vald_adress = st.selectbox(f"Välj adress i {chauffor_vald_bil} att dokumentera:", bilens_adresser)
+        
+        # Kameran aktiveras
+        photo_input = st.camera_input("Ta kort för att bekräfta leverans eller rapportera problem")
+        
+        # Skapa en unik nyckel för fotolagringen baserat på både bil och adress
+        foto_nyckel = f"{chauffor_vald_bil}_{vald_adress}"
         
         if photo_input:
-            # Spara fotot i minnet kopplat till just denna adress
-            st.session_state['saved_photos'][vald_adress] = photo_input
-            st.success(f"Foto har registrerats för: {vald_adress.split()[0]}!")
+            # Spara fotot under sin unika nyckel
+            st.session_state['saved_photos'][foto_nyckel] = photo_input
+            st.success(f"Foto registrerat för {vald_adress.split()[0]} på {chauffor_vald_bil}!")
+            st.rerun()
+            
+        # FIXEN: Hämtar och visar fotot direkt på skärmen så det inte försvinner
+        if foto_nyckel in st.session_state['saved_photos']:
+            st.write("✅ **Registrerat foto för denna adress:**")
+            st.image(st.session_state['saved_photos'][foto_nyckel], caption=f"Foto: {vald_adress}", width=400)
+            
+        # --- LIVE STATUS (Dynamiska mätare för vald bil) ---
+        st.write("---")
+        st.subheader(f"Live Status - {chauffor_vald_bil}")
         
-        # HÄR ÄR FIXEN: Visar bilden direkt så den INTE försvinner efter man tagit kortet
-        if vald_adress in st.session_state['saved_photos']:
-            st.write(f"✅ **Registrerat foto för denna adress:**")
-            st.image(st.session_state['saved_photos'][vald_adress], caption=f"Foto för {vald_adress}", width=400)
+        totalt = len(bil_df)
+        klara = len(bil_df[bil_df["Status"] == "Klar"])
+        problem = len(bil_df[bil_df["Status"] == "Problem"])
+        aterstar = totalt - klara
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric(label="Totalt antal stopp", value=f"{totalt} st")
+        with col2:
+            procent = f"{(klara/totalt)*100:.0f}%" if totalt > 0 else "0%"
+            st.metric(label="Utförda leveranser", value=f"{klara} st", delta=procent)
+        with col3:
+            st.metric(label="Aktiva avvikelser / Problem", value=f"{problem} st", delta=f"{aterstar} återstår", delta_color="inverse")
+            
     else:
-        st.warning("Det finns inga adresser i listan ännu. Chefen måste lägga till adresser först.")
-
-
-    # --- LIVE STATUS MÄTARE (Längst ner på chaufförssidan) ---
-    st.write("---")
-    st.subheader("Live Status")
-    
-    # Räkna ut statistik dynamiskt baserat på listan
-    totalt = len(current_df)
-    klara = len(current_df[current_df["Status"] == "Klar"])
-    aterstar = totalt - klara
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric(label="Antal Adresser", value=f"{totalt} st")
-    with col2:
-        procent = f"{(klara/totalt)*100:.0f}%" if totalt > 0 else "0%"
-        st.metric(label="Klara", value=f"{klara} st", delta=procent)
-    with col3:
-        st.metric(label="Återstår", value=f"{aterstar} st")
+        st.info(f"Det finns inga registrerade adresser för {chauffor_vald_bil} just nu. Gå till Chefsvyn för att lägga till en rutt.")
